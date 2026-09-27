@@ -1,0 +1,27 @@
+{
+  "name": "smart-curriculum-attendance",
+  "version": "1.0.0",
+  "description": "Smart Curriculum & Attendance App for Educational Institutions",
+  "main": "server/dist/server.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:client": "cd client && npm run dev",
+    "dev:server": "cd server && npm run dev",
+    "build": "cd client && npm run build && cd ../server && npm run build",
+    "start": "cd server && npm start",
+    "lint": "cd client && npm run lint",
+    "test": "echo \"Running test suites...\" && cd server && npm test"
+  },
+  "keywords": [
+    "attendance",
+    "curriculum",
+    "face-recognition",
+    "opencv",
+    "naac-reports"
+  ],
+  "author": "Institutional Engineering",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
