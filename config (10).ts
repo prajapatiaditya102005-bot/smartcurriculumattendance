@@ -4,5 +4,4 @@ export const config = {
   teamName: "Institutional Engineering",
   hackathonName: "Edition 2026",
   demoUrl: "[YOUR DEMO URL]",
-  apiBaseUrl: "/api"
 } as const;

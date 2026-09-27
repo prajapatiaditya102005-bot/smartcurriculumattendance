@@ -1,239 +1,66 @@
-import {
-  IUser,
-  IClass,
-  IAttendance,
-  IAssignment,
-  ISubmission,
-  IAnnouncement,
-  IQuery,
-  ICurriculum,
-  IDefaulterReport,
-  UserRole
-} from '../types';
-import { config } from '../config';
+import { Router } from 'express';
+import * as authController from '../controllers/authController';
+import * as userController from '../controllers/userController';
+import * as attendanceController from '../controllers/attendanceController';
+import * as scheduleController from '../controllers/scheduleController';
+import * as assignmentController from '../controllers/assignmentController';
+import * as announcementController from '../controllers/announcementController';
+import * as queryController from '../controllers/queryController';
+import * as reportController from '../controllers/reportController';
+import { authenticateJWT } from '../middleware/authMiddleware';
+import { requireRole } from '../middleware/roleGuard';
 
-const TOKEN_KEY = 'sca_auth_token';
-const USER_KEY = 'sca_auth_user';
+const router = Router();
 
-class ApiService {
-  private token: string | null = null;
+// --- Auth Routes ---
+router.post('/auth/register', authController.register);
+router.post('/auth/login', authController.login);
+router.get('/users/me', authenticateJWT, authController.getMe);
 
-  constructor() {
-    this.token = localStorage.getItem(TOKEN_KEY);
-  }
+// --- User Management (Admin / Authorized) ---
+router.get('/users', authenticateJWT, requireRole(['admin']), userController.getAllUsers);
+router.get('/users/:id', authenticateJWT, userController.getUserById);
+router.put('/users/:id', authenticateJWT, userController.updateUser);
+router.delete('/users/:id', authenticateJWT, requireRole(['admin']), userController.deleteUser);
 
-  setSession(token: string, user: IUser) {
-    this.token = token;
-    localStorage.setItem(TOKEN_KEY, token);
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
-  }
+// --- Schedules & Curriculum ---
+// View Schedules: Student, Faculty, Admin
+router.get('/schedules', authenticateJWT, requireRole(['student', 'faculty', 'admin']), scheduleController.getSchedules);
+router.get('/curriculum', authenticateJWT, scheduleController.getCurriculum);
+router.post('/curriculum/module-status', authenticateJWT, requireRole(['faculty', 'admin']), scheduleController.updateModuleStatus);
 
-  clearSession() {
-    this.token = null;
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-  }
+// --- Attendance Routes ---
+// Mark Attendance: Student (self), Faculty (class), Admin
+router.post('/attendance/face', authenticateJWT, requireRole(['student', 'faculty', 'admin']), attendanceController.markFaceAttendance);
+router.post('/attendance/manual', authenticateJWT, requireRole(['faculty', 'admin']), attendanceController.markManualAttendance);
+// View Attendance: Student (own), Faculty, Parent (child), Admin
+router.get('/attendance/:studentId', authenticateJWT, attendanceController.getStudentAttendance);
+router.get('/attendance/class/:classId', authenticateJWT, requireRole(['faculty', 'admin']), attendanceController.getClassAttendance);
 
-  getToken(): string | null {
-    return this.token || localStorage.getItem(TOKEN_KEY);
-  }
+// --- Assignments & Assessments ---
+// Give Assignments: Faculty, Admin
+router.get('/assignments', authenticateJWT, assignmentController.getAssignments);
+router.post('/assignments', authenticateJWT, requireRole(['faculty', 'admin']), assignmentController.createAssignment);
+// Submit Assignments: Student, Admin
+router.post('/assignments/:id/submit', authenticateJWT, requireRole(['student', 'admin']), assignmentController.submitAssignment);
+router.get('/assignments/:id/submissions', authenticateJWT, requireRole(['faculty', 'admin']), assignmentController.getSubmissionsForAssignment);
+router.post('/submissions/:id/grade', authenticateJWT, requireRole(['faculty', 'admin']), assignmentController.gradeSubmission);
 
-  getUser(): IUser | null {
-    const raw = localStorage.getItem(USER_KEY);
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw) as IUser;
-    } catch {
-      return null;
-    }
-  }
+// --- Announcements ---
+// View Announcements: All
+router.get('/announcements', authenticateJWT, announcementController.getAnnouncements);
+// Post Announcements: Faculty, Admin
+router.post('/announcements', authenticateJWT, requireRole(['faculty', 'admin']), announcementController.createAnnouncement);
 
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const token = this.getToken();
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(options.headers as Record<string, string> || {})
-    };
+// --- Queries & Doubts ---
+// Share Problems/Queries: Student (ask), Faculty (receive/reply), Admin
+router.get('/queries', authenticateJWT, requireRole(['student', 'faculty', 'admin']), queryController.getQueries);
+router.post('/queries', authenticateJWT, requireRole(['student', 'admin']), queryController.createQuery);
+router.post('/queries/:id/reply', authenticateJWT, requireRole(['faculty', 'admin']), queryController.replyToQuery);
 
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
+// --- Reports (Admin Only per Access Matrix) ---
+router.get('/reports/attendance', authenticateJWT, requireRole(['admin']), reportController.getAttendanceReport);
+router.get('/reports/defaulters', authenticateJWT, requireRole(['admin']), reportController.getDefaultersReport);
+router.get('/reports/naac-summary', authenticateJWT, requireRole(['admin']), reportController.getNAACSummary);
 
-    try {
-      const response = await fetch(`${config.apiBaseUrl}${endpoint}`, {
-        ...options,
-        headers
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'API request failed');
-      }
-
-      return data as T;
-    } catch (err: any) {
-      console.warn(`Fetch error for ${endpoint}:`, err.message);
-      throw err;
-    }
-  }
-
-  // --- Auth API ---
-  async login(email: string, password: string): Promise<{ token: string; user: IUser }> {
-    return this.request('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password })
-    });
-  }
-
-  async register(data: Partial<IUser> & { password: string }): Promise<{ token: string; user: IUser }> {
-    return this.request('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  }
-
-  async getMe(): Promise<{ user: IUser }> {
-    return this.request('/users/me');
-  }
-
-  // --- Users CRUD ---
-  async getUsers(role?: string): Promise<{ users: IUser[]; count: number }> {
-    return this.request(`/users${role ? `?role=${role}` : ''}`);
-  }
-
-  async updateUser(id: string, updates: Partial<IUser>): Promise<{ user: IUser }> {
-    return this.request(`/users/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(updates)
-    });
-  }
-
-  async deleteUser(id: string): Promise<{ success: boolean }> {
-    return this.request(`/users/${id}`, {
-      method: 'DELETE'
-    });
-  }
-
-  // --- Schedules & Curriculum ---
-  async getSchedules(): Promise<{ classes: IClass[] }> {
-    return this.request('/schedules');
-  }
-
-  async getCurriculum(classId?: string): Promise<{ curricula: ICurriculum[] }> {
-    return this.request(`/curriculum${classId ? `?classId=${classId}` : ''}`);
-  }
-
-  async updateModuleStatus(curriculum_id: string, module_number: number, completed: boolean): Promise<any> {
-    return this.request('/curriculum/module-status', {
-      method: 'POST',
-      body: JSON.stringify({ curriculum_id, module_number, completed })
-    });
-  }
-
-  // --- Attendance ---
-  async markFaceAttendance(class_id: string, image: string, student_id?: string): Promise<{ success: boolean; records: IAttendance[]; low_light_enhanced: boolean; message: string }> {
-    return this.request('/attendance/face', {
-      method: 'POST',
-      body: JSON.stringify({ class_id, image, student_id })
-    });
-  }
-
-  async markManualAttendance(class_id: string, student_id: string, status: string, date?: string): Promise<{ success: boolean; record: IAttendance }> {
-    return this.request('/attendance/manual', {
-      method: 'POST',
-      body: JSON.stringify({ class_id, student_id, status, date })
-    });
-  }
-
-  async getStudentAttendance(studentId: string): Promise<{
-    summary: { total: number; present: number; late: number; absent: number; percentage: number; isDefaulter: boolean };
-    records: IAttendance[];
-  }> {
-    return this.request(`/attendance/${studentId}`);
-  }
-
-  async getClassAttendance(classId: string, date?: string): Promise<{ records: IAttendance[] }> {
-    return this.request(`/attendance/class/${classId}${date ? `?date=${date}` : ''}`);
-  }
-
-  // --- Assignments ---
-  async getAssignments(classId?: string): Promise<{ assignments: IAssignment[] }> {
-    return this.request(`/assignments${classId ? `?classId=${classId}` : ''}`);
-  }
-
-  async createAssignment(data: Partial<IAssignment>): Promise<{ assignment: IAssignment }> {
-    return this.request('/assignments', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  }
-
-  async submitAssignment(assignmentId: string, file_url: string): Promise<{ submission: ISubmission }> {
-    return this.request(`/assignments/${assignmentId}/submit`, {
-      method: 'POST',
-      body: JSON.stringify({ file_url })
-    });
-  }
-
-  async getSubmissions(assignmentId: string): Promise<{ submissions: ISubmission[] }> {
-    return this.request(`/assignments/${assignmentId}/submissions`);
-  }
-
-  async gradeSubmission(submissionId: string, grade: number | string, feedback: string): Promise<{ submission: ISubmission }> {
-    return this.request(`/submissions/${submissionId}/grade`, {
-      method: 'POST',
-      body: JSON.stringify({ grade, feedback })
-    });
-  }
-
-  // --- Announcements ---
-  async getAnnouncements(): Promise<{ announcements: IAnnouncement[] }> {
-    return this.request('/announcements');
-  }
-
-  async createAnnouncement(title: string, body: string, role_target = 'all', priority = 'normal'): Promise<{ announcement: IAnnouncement }> {
-    return this.request('/announcements', {
-      method: 'POST',
-      body: JSON.stringify({ title, body, role_target, priority })
-    });
-  }
-
-  // --- Queries ---
-  async getQueries(): Promise<{ queries: IQuery[] }> {
-    return this.request('/queries');
-  }
-
-  async createQuery(faculty_id: string, subject: string, message: string): Promise<{ query: IQuery }> {
-    return this.request('/queries', {
-      method: 'POST',
-      body: JSON.stringify({ faculty_id, subject, message })
-    });
-  }
-
-  async replyToQuery(queryId: string, reply: string): Promise<{ query: IQuery }> {
-    return this.request(`/queries/${queryId}/reply`, {
-      method: 'POST',
-      body: JSON.stringify({ reply })
-    });
-  }
-
-  // --- Reports (Admin Only) ---
-  async getAttendanceReport(class_id?: string, startDate?: string, endDate?: string): Promise<any> {
-    const params = new URLSearchParams();
-    if (class_id) params.append('class_id', class_id);
-    if (startDate) params.append('startDate', startDate);
-    if (endDate) params.append('endDate', endDate);
-    return this.request(`/reports/attendance?${params.toString()}`);
-  }
-
-  async getDefaultersReport(): Promise<{ defaulters: IDefaulterReport[]; allStudentSummaries: IDefaulterReport[]; totalStudentsEvaluated: number; defaulterCount: number }> {
-    return this.request('/reports/defaulters');
-  }
-
-  async getNAACSummary(): Promise<any> {
-    return this.request('/reports/naac-summary');
-  }
-}
-
-export const api = new ApiService();
+export default router;

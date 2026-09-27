@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { ENV } from './config/env';
 import { connectDB } from './config/db';
 import apiRouter from './routes/api';
@@ -13,9 +14,6 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.get('/', (req, res) => {
   res.json({
     project: ENV.PROJECT_NAME,
-    team: ENV.TEAM_NAME,
-    hackathon: ENV.HACKATHON_NAME,
-    demoUrl: ENV.DEMO_URL,
     status: 'Online',
     timestamp: new Date().toISOString()
   });
@@ -23,6 +21,17 @@ app.get('/', (req, res) => {
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'healthy', project: ENV.PROJECT_NAME, version: '1.0.0' });
+});
+
+// Direct 1-Click ZIP Download Endpoint
+app.get('/download', (req, res) => {
+  const zipPath = path.resolve(__dirname, '../../smart-curriculum-attendance.zip');
+  res.download(zipPath, 'smart-curriculum-attendance.zip');
+});
+
+app.get('/download/smart-curriculum-attendance.zip', (req, res) => {
+  const zipPath = path.resolve(__dirname, '../../smart-curriculum-attendance.zip');
+  res.download(zipPath, 'smart-curriculum-attendance.zip');
 });
 
 app.use('/api', apiRouter);
@@ -38,8 +47,8 @@ const startServer = async () => {
   app.listen(ENV.PORT, () => {
     console.log(`=======================================================`);
     console.log(`🚀 ${ENV.PROJECT_NAME} API Server`);
-    console.log(`👨‍💻 Team: ${ENV.TEAM_NAME} | Hackathon: ${ENV.HACKATHON_NAME}`);
     console.log(`🌐 Server running on http://localhost:${ENV.PORT}`);
+    console.log(`📥 Download Endpoint: http://localhost:${ENV.PORT}/download`);
     console.log(`=======================================================`);
   });
 };
